@@ -1,5 +1,10 @@
 rm(list=ls())
+library("osfr")
 library("data.table")
+
+# download data file from OSF
+osf_download(subset(osf_ls_files(osf_retrieve_node("8r7gz")),name=="Study 1"),
+             conflicts="skip")
 
 ## prep data ##################################################################
 rawData <- data.table::fread("Study 1/S1_data.csv")
@@ -15,8 +20,7 @@ rawData[, treat := (condition=="moderate" | condition=="high")*1L]
 # outcome: life satisfaction
 rawData[, life_satisf := mean(c(ls1,ls2,ls3,ls4,ls5), na.rm=TRUE),  by=id]
 # rescale to between 0 and 1
-rawData[, life_satisf := (life_satisf-min(life_satisf))/
-          diff(range(life_satisf))]
+rawData[, life_satisf := (life_satisf-1)/7]
 
 # covariates: big five
 rawData[, c("bfi_extra", "bfi_agree", "bfi_consci", "bfi_neuro", "bfi_open") := 
@@ -65,8 +69,7 @@ rm(rawData,L.Data)
 summary(mydata)
 
 # analysis ====================================================================
-libraries_check <- c("data.table","lslx","regsem","glmnet",
-                     "twang","survey","CBPS")
+libraries_check <- c("data.table","lslx","regsem","glmnet","twang","survey")
 for (libs in libraries_check) {
   if(!libs %in% rownames(installed.packages())) {
     install.packages(libs,repos="http://lib.ugent.be/CRAN/")
@@ -86,7 +89,7 @@ L.selected[["all"]] <- var.list # including all covariates
 # order covariates based on priority to be confounders ====================== 
 L.ordered <- ForwardSelect_DS(Y=mydata$Y,X=mydata[,var.list],A=mydata$treat,
                               A.binary.par_model="mle")
-L.stable <- StdDiffEst_Ordered_DRAIPW(L.ordered$ordered,mydata,k=3,
+L.stable <- StdDiffEst_Ordered_DRAIPW(L.ordered$ordered,mydata,
                                       A.binary.par_model="mle")
 L.selected[["stability"]] <- L.ordered$ordered[1:L.stable$selected_orbit]
 
@@ -125,7 +128,7 @@ plot.df <- data.frame(t(sapply(0:p, function(x) {
   } else {
     l.select <- L.ordered$ordered[1:x]
   }
-  OneTrtCoef_Est(Ls=l.select,mydata)
+  OneDR_AIPW_Est(Ls=l.select,mydata,return.se=TRUE)
 })))
 plot.df[,"l"] <- plot.df$EST-qnorm(.975)*plot.df$SE
 plot.df[,"u"] <- plot.df$EST+qnorm(.975)*plot.df$SE
@@ -165,11 +168,6 @@ L.selected <- lapply(L.selected, function(l.select) {
     l.select <- "1" # ignoring all covariates
   }
   return(sort(l.select))
-})
-
-# calculate treatment effect estimate for each selected covariate set =======
-res <- lapply(L.selected, function(l.select) {
-  OneTrtCoef_Est(Ls=l.select,mydata)
 })
 
 # calculate treatment effect estimate for each selected covariate set =======

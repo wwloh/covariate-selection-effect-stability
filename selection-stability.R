@@ -23,18 +23,6 @@ ForwardSelect_DS <- function(Y,X,A,A.binary.par_model="mle") {
           ps.X.cand.lm <- glm(ps.X.cand,family=binomial(link = "logit"),
                                data=data.X.cand)
           ps.X.cand.pv <- coef(summary(ps.X.cand.lm))[X.cand,"Pr(>|z|)"]
-        } else if (A.binary.par_model=="CBPS") {
-          ps.X.cand.lm <- CBPS::CBPS(formula=ps.X.cand,data=data.X.cand,ATT=0,
-                                     iterations=10000)
-          ## avoid using summary that is automatically printed
-          ps.X.cand.est_std <- ( ps.X.cand.lm$coefficients/
-                                   sqrt(diag(ps.X.cand.lm$var)) )[,1]
-          ps.X.cand.pv <- pnorm(abs(ps.X.cand.est_std),lower.tail=FALSE)*2
-          if (X.cand %in% names(ps.X.cand.pv)) {
-            ps.X.cand.pv <- as.numeric(ps.X.cand.pv[X.cand])
-          } else {
-            ps.X.cand.pv <- as.numeric(ps.X.cand.pv[length(ps.X.cand.pv)])
-          }
         }
       } else {
         ps.X.cand.lm <- lm(ps.X.cand,data=data.X.cand)
@@ -121,50 +109,6 @@ TreatmentHeterogeneity <- function(x,s,k=NA) {
   return(window.summ)
 }
 
-StdDiffEst_Ordered_lm <- function(L.ordered,mydata,k,robust=FALSE) {
-  # L.ordered: sequence of ordered covariate indices
-  p_ <- length(L.ordered)
-  diags.list <- lapply(1:p_, function(x) {
-    OneTrtCoef_Est(Ls=L.ordered[1:x],mydata=mydata,return.lm=TRUE)
-  })
-  # differences with benchmark and their SE
-  diags <- do.call(rbind,lapply(1:p_, function(x) {
-    delta.est <- coef(diags.list[[x]])["treat"]-coef(diags.list[[p_]])["treat"]
-    if (!robust) {
-      # using CPH (1995) Eq.(18)
-      ## requires homoscedasticity assumption
-      delta.var <- vcov(diags.list[[p_]])["treat","treat"]-
-        (vcov(diags.list[[x]])["treat","treat"]*
-           (summary(diags.list[[p_]])$sigma^2)/(summary(diags.list[[x]])$sigma^2))
-    } else {
-      # using influence function from SIM paper 
-      n_ <- nrow(mydata)
-      infn.treat <- sapply(c(x,p_), function(x_) {
-        # fit the treatment model given covariates from the outcome model
-        fitA <- lm(
-          as.formula(paste0("treat~",paste(L.ordered[1:x_],collapse="+"))),
-          data=mydata)
-        fitA.resids <- residuals(fitA)
-        fitY.resids <- residuals(diags.list[[x_]])
-        # estimated influence functions using OLS estimators
-        return( fitA.resids*fitY.resids/mean(mydata$treat*fitA.resids) )
-      })
-      delta.var <- var(infn.treat[,1]-infn.treat[,2])/n_
-    }
-    if (abs(delta.var)<.Machine$double.eps) {
-      delta.var <- 0.0 # avoid warning message if sqrt of small negative value
-    }
-    c("diff"=delta.est,"se"=sqrt(delta.var))
-  }))
-  
-  # Q statistics for given window width
-  Qk <- TreatmentHeterogeneity(x=diags[,"diff.treat"],
-                               s=diags[,"se"],k=k)
-  crits <- as.integer(names(which.min(Qk)))
-  return(list("est"=diags,"selected_orbit"=crits,Qk))
-}
-
-
 # calculate DR-AIPW effect estimator
 OneDR_AIPW_Est <- function(Ls, mydata, return.se=FALSE, bal.tab=FALSE,
                            A.binary.par_model="mle") {
@@ -184,12 +128,6 @@ OneDR_AIPW_Est <- function(Ls, mydata, return.se=FALSE, bal.tab=FALSE,
     stm <- tryCatch(
       system.time(
         ps.fit <- glm(ps.Ls,family=binomial("logit"), data=mydata)),
-      error=function(cond) return(NA))
-  } else if (A.binary.par_model=="CBPS") {
-    stm <- tryCatch(
-      system.time(
-        ps.fit <- CBPS::CBPS(formula=ps.Ls, data=mydata, ATT=0, 
-                             iterations=10000)),
       error=function(cond) return(NA))
   }
   if (any(is.na(stm))) {
@@ -270,7 +208,7 @@ OneDR_AIPW_Est <- function(Ls, mydata, return.se=FALSE, bal.tab=FALSE,
   return(tau)
 }
 
-StdDiffEst_Ordered_DRAIPW <- function(L.ordered,mydata,k,...) {
+StdDiffEst_Ordered_DRAIPW <- function(L.ordered,mydata,k=3,...) {
   # L.ordered: sequence of ordered covariate indices
   p_ <- length(L.ordered)
   diags.list <- lapply(1:p_, function(x) {

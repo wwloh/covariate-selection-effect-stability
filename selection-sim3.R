@@ -51,6 +51,7 @@ One_sim <- function() {
   L.selected[["none"]] <- "1" # ignoring all covariates
   L.selected[["unwanted.only"]] <- paste0("L.",lI) # instruments only
   L.selected[["target"]] <- paste0("L.",c(lC,lP)) # target set of covariates
+  L.selected[["pred.treat"]] <- paste0("L.",c(lC,lI)) # predictors of treatment
   
   est.lslx <- NULL
   # variable selection procedures for the outcome model =======================
